@@ -36,18 +36,22 @@ import android.preference.PreferenceManager;
 import android.text.Html;
 import android.text.Spanned;
 import android.text.util.Linkify;
+import android.view.ContextMenu;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ContextMenu.ContextMenuInfo;
 import android.view.View.OnClickListener;
 import android.view.Window;
 import android.widget.AdapterView;
+import android.widget.AdapterView.AdapterContextMenuInfo;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListView;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -85,7 +89,12 @@ public class HNPost extends Activity{
 	    actionBar.addAction(mAddAction);
 	    
 		Intent intent = getIntent();
-		postId = intent.getStringExtra("postId");
+		
+		if(Intent.ACTION_VIEW.equals(intent.getAction()))
+			postId = intent.getData().getQueryParameter("id");
+		else
+			postId = intent.getStringExtra("postId");
+		
 		type = intent.getStringExtra("type");
 		
 		if(savedInstanceState != null)
@@ -150,7 +159,7 @@ public class HNPost extends Activity{
 		super.onSaveInstanceState(savedInstanceState);
 	}
 	
-	@Override
+	/*@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
 		MenuInflater inflater = getMenuInflater();
 		inflater.inflate(R.menu.options_action_menu, menu);
@@ -173,7 +182,74 @@ public class HNPost extends Activity{
 		default:
 			return super.onOptionsItemSelected(item);
 		}
+	}*/
+	
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		MenuInflater inflater = getMenuInflater();
+		inflater.inflate(R.menu.options_news_menu, menu);
+		return true;
 	}
+	
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		switch(item.getItemId()) {
+		case R.id.prefs:
+			Intent intent = new Intent(getBaseContext(), HNPreferences.class);
+			startActivity(intent);
+			return true;
+		case R.id.credits:
+			Toast.makeText(this, "Thanks to ronnieroller.com for the hackernews api, newsyc.me for the ui idea and johannilsson for the actionbar lib", Toast.LENGTH_LONG).show();
+			return true;
+		default:
+			return super.onOptionsItemSelected(item);
+		}
+	}
+	
+	@Override
+    public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) {
+    	super.onCreateContextMenu(menu, v, menuInfo);
+    	MenuInflater inflater = getMenuInflater();
+    	inflater.inflate(R.menu.options_action_menu, menu);
+    }
+    
+    @Override
+    public boolean onContextItemSelected(MenuItem item) {
+    	String replyId = null;
+    	String text = null;
+    	AdapterContextMenuInfo info = (AdapterContextMenuInfo) item.getMenuInfo();
+    	RelativeLayout parent = ((RelativeLayout) info.targetView);
+    	TextView tvReplyId = (TextView) parent.findViewById(R.id.replyId);
+    	TextView tvReplyContent = (TextView) parent.findViewById(R.id.content);
+    	TextView tvPostUrl = (TextView) parent.findViewById(R.id.url);
+    	if(tvReplyId != null) {
+    		replyId = tvReplyId.getText().toString();
+    		text = tvReplyContent.getText().toString();
+    	} else 
+    		text = tvPostUrl.getText().toString();
+    	switch(item.getItemId()) {
+		case R.id.up:
+			if(replyId != null)
+				new HNVote().execute("reply", "up", replyId);
+			else
+				new HNVote().execute("post", "up", type);
+			return true;
+		case R.id.down:
+			if(replyId != null)
+				new HNVote().execute("reply", "down", replyId);
+			else
+				new HNVote().execute("post", "down", type);
+			return true;
+		case R.id.share:
+			Intent shareIntent = new Intent(Intent.ACTION_SEND);
+			shareIntent.setType("text/plain");
+			shareIntent.putExtra(Intent.EXTRA_TEXT, text);
+			startActivity(Intent.createChooser(shareIntent, "Share"));
+			return true;
+    	default:
+    		return super.onContextItemSelected(item);
+    	}
+    }
 	
 	private void parseJson(String raw) {
     	try {
@@ -334,8 +410,15 @@ public class HNPost extends Activity{
 				}
 				
 				HttpGet grequest = new HttpGet();
-				String voteUrl = "http://news.ycombinator.com/vote?for=" + postId 
-							   + "&dir=" + args[0] + "&whence=" + args[1];
+				String voteUrl;
+				
+				if(args[0] == "post")
+					voteUrl = "http://news.ycombinator.com/vote?for=" + postId 
+							   + "&dir=" + args[1] + "&whence=" + args[2];
+				else
+					voteUrl = "http://news.ycombinator.com/vote?for=" + args[2]
+					   + "&dir=" + args[1] + "&whence=item?id=" + postId;
+				
 				grequest.setURI(new URI(voteUrl));
 				String content = httpClient.execute(grequest, mResponseHandler, ctx);
 				if(content.equals("Can't make that vote.")) {
@@ -347,7 +430,7 @@ public class HNPost extends Activity{
 				e.printStackTrace();
 				return 2;
 			}
-			if(args[0] == "up")
+			if(args[1] == "up")
 				return 0;
 			else
 				return 1;

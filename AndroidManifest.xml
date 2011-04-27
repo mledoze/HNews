@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
       package="com.gabriele.hnews"
-      android:versionCode="2"
-      android:versionName="1.1"
+      android:versionCode="6"
+      android:versionName="1.2.3"
       >
     
     <uses-sdk android:minSdkVersion="7"></uses-sdk> 
@@ -19,10 +19,32 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" 
+                	  android:host="news.ycombinator.com" 
+                	  android:pathPattern="/new.*"></data>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+           
         </activity>
 		<activity android:name=".HNPost"
 				  android:configChanges="orientation"
 				  >
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" 
+                	  android:host="news.ycombinator.com" 
+                	  android:pathPrefix="/item"/>
+            </intent-filter>
 		</activity>
 		<activity android:name=".HNReply"
 				  android:configChanges="orientation"
