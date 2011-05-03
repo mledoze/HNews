@@ -208,9 +208,7 @@ public class HNReply extends Activity {
 				@Override
 				public void onClick(View v) {
 					EditText etText = (EditText) dialog.findViewById(R.id.text);
-					
 					String text = etText.getText().toString();
-					
 					new HNSubmit().execute(replyId, postId, text);
 					dialog.dismiss();
 				}
@@ -256,8 +254,12 @@ public class HNReply extends Activity {
 				HttpContext ctx = HNApp.getCookie();
 				
 				if(ctx == null) {
-					publishProgress("Login Error");
-					return 3;
+					publishProgress("Loggin in ...");
+					ctx = HNApp.login();
+					if(ctx == null) {
+						publishProgress("Login error");
+						return 3;
+					}
 				}				
 				
 				HttpGet grequest = new HttpGet();
@@ -309,8 +311,12 @@ public class HNReply extends Activity {
 				HttpContext ctx = HNApp.getCookie();
 				
 				if(ctx == null) {
-					publishProgress("Login Error");
-					return 1;
+					publishProgress("Loggin in ...");
+					ctx = HNApp.login();
+					if(ctx == null) {
+						publishProgress("Login error");
+						return 1;
+					}
 				}
 				
 				HttpGet grequest = new HttpGet();

@@ -7,6 +7,7 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import org.apache.http.HttpResponse;
@@ -27,13 +28,16 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 import android.view.ContextMenu;
 import android.view.ContextMenu.ContextMenuInfo;
 import android.view.Menu;
@@ -67,16 +71,22 @@ public class HNews extends Activity  {
 	private ActionBar actionBar;
     private HNewsAdapter adapter;
     private SharedPreferences prefs;
-
+    private ArrayList<HNewsItem> data;
+    
     private String API_HOME = "http://api.ihackernews.com/page";
 	private String API_NEW = "http://api.ihackernews.com/new";
+	private String API_HCKR = "http://hckrnews.com/data/latest.js";
 	private String API_NEXT;
-	
-	private boolean homePage = true;
+	private String API_END;
+	private String location;
+
     private boolean loading = true;
-	
-    static final int DIALOG_ADD_ENTRY = 0;
+    private boolean online = true;
+    private boolean apiError = false;
     
+    static final int DIALOG_ADD_ENTRY = 0;
+    static final int DIALOG_CHOOSE = 1;
+
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -86,38 +96,40 @@ public class HNews extends Activity  {
 
         HNApp = (HNApplication)getApplicationContext();
         	
-        prefs = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
-        
+        prefs = getSharedPreferences("cache", Context.MODE_PRIVATE);
+               
         Intent intent = getIntent();
         if(Intent.ACTION_VIEW.equals(intent.getAction())) {
-        	String loc = intent.getData().getLastPathSegment();
-        	if(loc.equals("news"))
-        		homePage = true;
+        	location = intent.getData().getLastPathSegment();
+        	if(location == "news")
+        		API_END = API_HOME;
         	else
-        		homePage = false;
+        		API_END = API_NEW;
         }
-    
+        else {
+        	location = "news";
+            API_END = API_HOME;
+        }
+        
         actionBar = (ActionBar) findViewById(R.id.actionbar);
-        if(homePage)
-        	actionBar.setTitle("News");
-        else
-        	actionBar.setTitle("Newest");
+        actionBar.setTitle(capitalize(location));
         actionBar.setHomeAction(new IntentAction(this, HNApp.createIntent(this), R.drawable.ic_title_home_default));
         actionBar.addAction(mUpdateAction);
         actionBar.addAction(mLoadNewAction);
         actionBar.addAction(mAddAction);
-		adapter = new HNewsAdapter(getApplicationContext(), R.layout.newsitem, R.id.title, new ArrayList<HNewsItem>());
+        
+        //adapter = new HNewsAdapter(getApplicationContext(), R.layout.newsitem, R.id.title, data);
 		
         lv = (ListView)findViewById(R.id.news);
         registerForContextMenu(lv);
-        
-        lv.setAdapter(adapter);
+        loadFromCache();
+//        lv.setAdapter(adapter);
 
         lv.setOnScrollListener(new OnScrollListener() {
 
 			@Override
 			public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
-				if (!loading && (firstVisibleItem + visibleItemCount) >= (totalItemCount - 15)) {
+				if (!apiError && online && !(API_END == API_HCKR) && !loading && (firstVisibleItem + visibleItemCount) >= (totalItemCount - 15)) {
 					new getJson(true).execute(API_NEXT);//, true);
 					loading = true;
 				}
@@ -136,18 +148,13 @@ public class HNews extends Activity  {
 				String postId = (String)tvPostId.getText();
 				Intent intent = new Intent(getApplicationContext(), HNPost.class);
 				intent.putExtra("postId", postId);
-				if(homePage)
-					intent.putExtra("type", "news");
-				else
-					intent.putExtra("type", "newest");
+				intent.putExtra("type", location);
+				HNewsItem item = adapter.getItem(arg2);
+				HNApp.setPost(item.getPostId(), item);
 				startActivity(intent);
 			}
         });
-        if(homePage)
-        	new getJson(false).execute(API_HOME);//, false);
-        else
-        	new getJson(false).execute(API_NEW);
-        
+       	new getJson(false).execute(API_END);
         
         if(Intent.ACTION_SEND.equals(intent.getAction())) {
         	String t = intent.getStringExtra(Intent.EXTRA_TEXT);
@@ -159,6 +166,31 @@ public class HNews extends Activity  {
         	showDialog(DIALOG_ADD_ENTRY, bundle);
         }
         
+    }
+    
+    private void saveInCache() {
+    	Editor editor = getSharedPreferences("cache", Context.MODE_PRIVATE).edit();
+   	 	try {
+			editor.putString(location, ObjectSerializer.serialize(data));
+			editor.commit();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+    }
+    
+    private void loadFromCache() {
+    	online = false;
+		data = new ArrayList<HNewsItem>();
+		String news = prefs.getString(location, null);
+	    if(news != null) {
+	    	try {
+	    		data = (ArrayList<HNewsItem>) ObjectSerializer.deserialize(news);
+	    	} catch (Exception e) {
+				e.printStackTrace();
+			}
+	    }
+	    adapter = new HNewsAdapter(getApplicationContext(), R.layout.newsitem, R.id.title, data);
+	    lv.setAdapter(adapter);
     }
     
     @Override
@@ -175,7 +207,7 @@ public class HNews extends Activity  {
     	TextView tvUrl = (TextView) parent.findViewById(R.id.url);
     	String url = (String)tvUrl.getText();
     	if(url.startsWith("/")) {
-    		url = "http://news.ycombinator.com/item?id=" + url.split("/")[2] ;
+    		url = "http://news.ycombinator.com/item?id=" + url.split("/")[2];
     	}
     	switch (item.getItemId()) {
     	case R.id.open:
@@ -209,7 +241,10 @@ public class HNews extends Activity  {
 			startActivity(intent);
 			return true;
 		case R.id.credits:
-			Toast.makeText(this, "Thanks to ronnieroller.com for the hackernews api, newsyc.me for the ui idea and johannilsson for the actionbar lib", Toast.LENGTH_LONG).show();
+			Toast.makeText(this, "Thanks to ronnieroller.com for the " +
+								  "hackernews api, newsyc.me for the ui " +
+								  "idea and johannilsson for the actionbar " +
+								  "lib", Toast.LENGTH_LONG).show();
 			return true;
 		default:
 			return super.onOptionsItemSelected(item);
@@ -218,17 +253,21 @@ public class HNews extends Activity  {
     
 	@Override
 	protected void onPrepareDialog(int id, Dialog dialog, Bundle bundle) {
-		String title = bundle.getString("title");
-		String url = bundle.getString("url");
-		String text = bundle.getString("text");
-		
-		EditText etTitle = (EditText) dialog.findViewById(R.id.title);
-		EditText etUrl = (EditText) dialog.findViewById(R.id.url);
-		EditText etText = (EditText) dialog.findViewById(R.id.text);
-		
-		etTitle.setText(title);
-		etUrl.setText(url);
-		etText.setText(text);
+		switch(id) {
+		case DIALOG_ADD_ENTRY:
+			String title = bundle.getString("title");
+			String url = bundle.getString("url");
+			String text = bundle.getString("text");
+			
+			EditText etTitle = (EditText) dialog.findViewById(R.id.title);
+			EditText etUrl = (EditText) dialog.findViewById(R.id.url);
+			EditText etText = (EditText) dialog.findViewById(R.id.text);
+			
+			etTitle.setText(title);
+			etUrl.setText(url);
+			etText.setText(text);
+			break;
+		}
 		
 	}
 	
@@ -266,54 +305,58 @@ public class HNews extends Activity  {
     		});
     		dialog = dialogEntry;
 			break;
-			default:
-				dialog = null;
+			
+		case DIALOG_CHOOSE:
+			final CharSequence[] items = {"News", "Newest", "Hckr ( By Date )"};
+			
+			AlertDialog.Builder builder = new AlertDialog.Builder(this);
+			builder.setTitle("Pick a category");
+			builder.setItems(items, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					location = ((String) items[which]).toLowerCase();
+					switch(which) {
+					case 0:
+						API_END = API_HOME;
+						break;
+					case 1:
+						API_END = API_NEW;
+						break;
+					case 2:
+						API_END = API_HCKR;
+						break;
+					}
+					new getJson(false).execute(API_END);
+				}
+			});
+			
+			dialog = builder.create();
+			break;
+		default:
+			dialog = null;
 		}
 		return dialog;
 	}
 	
-    private void parseJson(String raw, boolean appendData) {
-    	try {
-    		if(!appendData)
-    			adapter.clear();
-			JSONObject json = new JSONObject(raw);
-			JSONArray news = json.getJSONArray("items");
-			
-			if(homePage)
-				API_NEXT = API_HOME + "/" + json.getString("nextId");
-			else
-				API_NEXT = API_NEW + "/" + json.getString("nextId");
-				
-			for(int i=0; i<news.length(); i++) {
-				HNewsItem item = new HNewsItem();
-				
-				JSONObject singleNews = news.getJSONObject(i);
-				String domain;
-
-				try {
-					domain = new URL(singleNews.getString("url")).getHost();
-				} catch (MalformedURLException e) {
-					domain = "news.ycombinator.com";
-				}
-				
-				item.setTitle(singleNews.getString("title"));
-				item.setAuthor(singleNews.getString("postedBy"));
-				item.setComments(singleNews.getString("commentCount"));
-				item.setUrl(singleNews.getString("url"));
-				item.setPoints(singleNews.getString("points"));
-				item.setTime(singleNews.getString("postedAgo"));
-				item.setPostId(singleNews.getString("id"));
-				item.setDomain(domain);
-				
-				HNApp.setPost(singleNews.getString("id"), item);
-				adapter.add(item);
-
+	private String capitalize(String s) {
+		return s.subSequence(0, 1).toString().toUpperCase() + s.substring(1);
+	}
+	
+     private String parseTime(long time) {
+    	long seconds = time/60;
+    	long hours;
+    	long days;
+		if(seconds >= 60) {
+    		hours = seconds / 60;
+			if(hours >= 60) {
+				days = hours / 60;
+				return days + " days ago";
 			}
-
-		} catch (JSONException e) {
-			e.printStackTrace();
+			return hours + " hours ago";
 		}
-    }
+		return seconds + " seconds ago";
+    		
+    }	
     
     final MyAction mUpdateAction = new MyAction() {
     	@Override
@@ -323,10 +366,7 @@ public class HNews extends Activity  {
     	
     	@Override
     	public void performAction(View view) {
-    		if(homePage)
-    			new getJson(false).execute(API_HOME);
-    		else
-    			new getJson(false).execute(API_NEW);
+   			new getJson(false).execute(API_END);
     		lv.setSelectionAfterHeaderView();
     	}
     	
@@ -344,14 +384,7 @@ public class HNews extends Activity  {
     	    	
     	@Override
     	public void performAction(View view) {
-    		if(homePage) {
-    			homePage = false;
-    			new getJson(false).execute(API_NEW);//, false);
-    		}
-    		else {
-    			homePage = true;
-    			new getJson(false).execute(API_HOME);//, false);
-    		}
+    		showDialog(DIALOG_CHOOSE);
     		lv.setSelectionAfterHeaderView();
     	}
     };
@@ -385,10 +418,96 @@ public class HNews extends Activity  {
     	}
     };
     
+    private void parseJson(String raw, boolean appendData) {
+    	try {
+    		if(!appendData) {
+    			adapter.clear();
+    		}
+			JSONObject json = new JSONObject(raw);
+			JSONArray news = json.getJSONArray("items");
+			API_NEXT = API_END + "/" + json.getString("nextId");
+			apiError = false;
+			
+			for(int i=0; i<news.length(); i++) {
+				HNewsItem item = new HNewsItem();
+				
+				JSONObject singleNews = news.getJSONObject(i);
+				String domain;
+
+				try {
+					domain = new URL(singleNews.getString("url")).getHost();
+				} catch (MalformedURLException e) {
+					domain = "news.ycombinator.com";
+				}
+				
+				item.setTitle(singleNews.getString("title"));
+				item.setAuthor(singleNews.getString("postedBy"));
+				item.setComments(singleNews.getString("commentCount"));
+				item.setUrl(singleNews.getString("url"));
+				item.setPoints(singleNews.getString("points"));
+				item.setTime(singleNews.getString("postedAgo"));
+				item.setPostId(singleNews.getString("id"));
+				item.setDomain(domain);
+				
+				//HNApp.setPost(singleNews.getString("id"), item);
+				adapter.add(item);
+			}
+			saveInCache();
+		} catch (JSONException e) {
+			apiError = true;
+			Toast.makeText(getApplicationContext(), "Api error", Toast.LENGTH_SHORT).show();
+			e.printStackTrace();
+		}
+    }
+    
+    private void parseHckrJson(String raw, boolean appendData) {
+    	try {
+    		if(!appendData) {
+    			adapter.clear();
+    		}
+    		raw = "{\"items\":" + raw.substring(15) + "}";
+
+			JSONObject json = new JSONObject(raw);
+			JSONArray news = json.getJSONArray("items");
+			
+			for(int i=0; i<news.length(); i++) {
+				HNewsItem item = new HNewsItem();
+				
+				JSONObject singleNews = news.getJSONObject(i);
+
+				item.setTitle(singleNews.getString("link_text"));
+				item.setAuthor(singleNews.getString("submitter"));
+				item.setComments(singleNews.getString("comments"));
+				item.setUrl(singleNews.getString("link"));
+				item.setPoints(singleNews.getString("points"));
+				
+				long epoch = System.currentTimeMillis()/1000;
+				long timeStamp = Long.parseLong(singleNews.getString("date"));
+				long date = epoch - timeStamp;
+				
+				item.setTime(parseTime(date));
+				item.setPostId(singleNews.getString("id"));
+				try {
+					item.setDomain(singleNews.getString("source"));
+				} catch (JSONException e ){
+					item.setDomain("");
+				}
+				//HNApp.setPost(singleNews.getString("id"), item);
+				adapter.add(item);
+			}
+			saveInCache();
+
+		} catch (JSONException e) {
+			Toast.makeText(getApplicationContext(), "Api error", Toast.LENGTH_SHORT).show();
+			e.printStackTrace();
+		}
+    }
+    
+
     
     private class getJson extends AsyncTask<String, String, Integer> {
     	
-    	boolean appendData;
+    	private boolean appendData;
     	
     	public getJson(boolean appendData) {
     		this.appendData = appendData;
@@ -405,28 +524,33 @@ public class HNews extends Activity  {
 				URI targetUri = new URI((String)args[0]);
 				request.setURI(targetUri);
 				String result = httpClient.execute(request, mResponseHandler);
+				online = true;
 				publishProgress(result);
 				return 0;
 			} catch(Exception e) {
+				online = false;
 				e.printStackTrace();
 				return 1;
 			}
 		}
     	
     	protected void onProgressUpdate(String... result) {
-    		parseJson(result[0], appendData);
-    	}
-    	
-    	protected void onPostExecute(Integer v) {
-    		if(v == 0) {
-    			loading = false;
-    			if(homePage)
-    				actionBar.setTitle("News");
-    			else
-    				actionBar.setTitle("Newest");
-    			adapter.notifyDataSetChanged();
+    		if(API_END == API_HCKR) {
+    			parseHckrJson(result[0], appendData);
+    			return;
     		} else {
-    			actionBar.setTitle("No Internet Connection");
+    			parseJson(result[0], appendData);
+    			return;
+    	 	}
+    	}
+    	protected void onPostExecute(Integer v) {
+    		actionBar.setTitle(capitalize(location));
+			loading = false;
+    		if(v == 0) {
+   				adapter.notifyDataSetChanged();
+    		} else {
+    			Toast.makeText(getApplicationContext(), "No Internet Connectivity", Toast.LENGTH_SHORT).show();
+				loadFromCache();
     		}
     	}
     };
@@ -440,8 +564,12 @@ public class HNews extends Activity  {
 				HttpContext ctx = HNApp.getCookie();
 				
 				if(ctx == null) {
-					publishProgress("Login Error");
-					return 1;
+					publishProgress("Loggin in ...");
+					ctx = HNApp.login();
+					if(ctx == null) {
+						publishProgress("Login error");
+						return 1;
+					}
 				}
 				
 				HttpGet grequest = new HttpGet();
@@ -487,12 +615,12 @@ public class HNews extends Activity  {
 			switch(arg) {
 			case 0:
 				Toast.makeText(getApplicationContext(), "Submitted", Toast.LENGTH_SHORT).show();
-				return;
+				break;
 			case 2:
 				Toast.makeText(getApplicationContext(), "Error", Toast.LENGTH_SHORT).show();
-				return;
+				break;
 			}
-			
+			return;
 		}
 		
     }

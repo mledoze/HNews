@@ -290,6 +290,7 @@ public class HNPost extends Activity{
 			}
 
 		} catch (JSONException e) {
+			Toast.makeText(getApplicationContext(), "Api error", Toast.LENGTH_SHORT).show();
 			e.printStackTrace();
 		}
     }
@@ -387,11 +388,11 @@ public class HNPost extends Activity{
     	}
     	
     	protected void onPostExecute(Integer v) {
+			actionBar.setTitle("HackerNews");
     		if(v == 0) {
-    			actionBar.setTitle("HackerNews");
     			adapter.notifyDataSetChanged();
     		} else {
-    			actionBar.setTitle("No Internet Connection");
+    			Toast.makeText(getApplicationContext(), "No Internet Connectivity", Toast.LENGTH_SHORT).show();
     		}
     	}
     };
@@ -405,8 +406,12 @@ public class HNPost extends Activity{
 				HttpContext ctx = HNApp.getCookie();
 				
 				if(ctx == null) {
-					publishProgress("Login Error");
-					return 3;
+					publishProgress("Loggin in ...");
+					ctx = HNApp.login();
+					if(ctx == null) {
+						publishProgress("Login error");
+						return 3;
+					}
 				}
 				
 				HttpGet grequest = new HttpGet();
@@ -464,8 +469,12 @@ public class HNPost extends Activity{
 				HttpContext ctx = HNApp.getCookie();
 				
 				if(ctx == null) {
-					publishProgress("Login Error");
-					return 1;
+					publishProgress("Loggin in ...");
+					ctx = HNApp.login();
+					if(ctx == null) {
+						publishProgress("Login error");
+						return 3;
+					}
 				}
 				
 				HttpGet grequest = new HttpGet();
